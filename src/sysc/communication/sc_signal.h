@@ -167,6 +167,17 @@ protected:
 
     // constructor and destructor
 
+    // The name may be the result of sc_gen_unique_name(), which is only
+    // valid until the next call of that function. This constructor uses
+    // the name before it creates the value, as the constructor of T may
+    // generate names itself. The new value is a copy of the current
+    // value, which write() relies on.
+    explicit sc_signal_t( const char* name_ )
+      : base_type( name_ )
+      , m_cur_val()
+      , m_new_val( m_cur_val )
+    {}
+
     sc_signal_t( const char* name_, const T& initial_value_ )
       : base_type( name_ )
       , m_cur_val( initial_value_ )
@@ -356,12 +367,12 @@ public:
     // constructors and destructor
 
     sc_signal()
-      : base_type( sc_gen_unique_name( "signal" ), value_type() )
+      : base_type( sc_gen_unique_name( "signal" ) )
     {}
 
     explicit
     sc_signal( const char* name_ )
-      : base_type( name_, value_type() )
+      : base_type( name_ )
     {}
 
     sc_signal( const char* name_, const value_type& initial_value_ )

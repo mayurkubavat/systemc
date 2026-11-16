@@ -51,7 +51,8 @@ namespace sc_core {
 // | other than initialize some fields. The real work occurs in sc_cor_pkg_std_thread::create().
 // +------------------------------------------------------------------------------------------------
 sc_cor_std_thread::sc_cor_std_thread( sc_cor_fn fn, void* arg_p )
-    : m_cor_fn_arg( 0 ), m_pkg_p( 0 )
+    : m_cor_fn( 0 ), m_cor_fn_arg( 0 ), m_pkg_p( 0 ), m_thread_p( 0 )
+    , m_started( false ), m_exit( false )
 {
     DEBUGF << this << ": sc_cor_std_thread::sc_cor_std_thread()" << std::endl;
 }
@@ -62,11 +63,34 @@ sc_cor_std_thread::sc_cor_std_thread( sc_cor_fn fn, void* arg_p )
 // | 
 // | This is the object instance destructor for this object type. It detaches and frees the 
 // | std::thread associated with this object instance.
+// |
+// | Notes:
+// |   (1) A thread that never got control (e.g., a process killed before it ran) is still
+// |       waiting on m_condition in invoke_thread(). Destroying a condition variable that has
+// |       a waiter is undefined behavior and blocks forever with glibc, so release that thread
+// |       and join it before the members are destroyed.
 // +------------------------------------------------------------------------------------------------
 sc_cor_std_thread::~sc_cor_std_thread()
 {
     DEBUGF << this << ": sc_cor_std_thread::~sc_cor_std_thread()" << std::endl;
-    m_thread_p->detach(); 
+    if ( m_thread_p == 0 )
+        return;
+
+    bool started;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        started = m_started;
+        m_exit = !started;
+    }
+    if ( started )
+    {
+        m_thread_p->detach();
+    }
+    else
+    {
+        m_condition.notify_one();
+        m_thread_p->join();
+    }
     delete m_thread_p; 
 }
 
@@ -105,7 +129,14 @@ void sc_cor_std_thread::invoke_thread(void* context_p)
     child_lock.lock();
     create_lock.unlock();
     p->m_condition.wait(child_lock);
+    p->m_started = true;
+    bool exit = p->m_exit;
     child_lock.unlock();
+
+    // EXIT IF THE COROUTINE IS DESTROYED BEFORE IT WAS EVER RESUMED:
+
+    if ( exit )
+        return;
 
     // CALL THE SYSTEMC CODE THAT WILL ACTUALLY START THE THREAD OFF:
 

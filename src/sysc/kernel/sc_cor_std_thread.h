@@ -73,6 +73,8 @@ class sc_cor_std_thread : public sc_cor
     std::mutex                   m_mutex;        // Mutex
     sc_cor_pkg_std_thread*       m_pkg_p;        // the creating coroutine package
     std::thread*                 m_thread_p;     // Our std::thread.
+    bool                         m_started;      // Thread left its start-up wait.
+    bool                         m_exit;         // Exit without running m_cor_fn.
 
   private:
 

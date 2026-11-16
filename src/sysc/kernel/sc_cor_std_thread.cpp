@@ -69,6 +69,9 @@ sc_cor_std_thread::sc_cor_std_thread( sc_cor_fn fn, void* arg_p )
 // |       waiting on m_condition in invoke_thread(). Destroying a condition variable that has
 // |       a waiter is undefined behavior and blocks forever with glibc, so release that thread
 // |       and join it before the members are destroyed.
+// |   (2) A thread that did start is detached. If it is still suspended in yield() (only
+// |       possible when sc_simcontext::reset() runs with live processes), its condition
+// |       variable is destroyed with a waiter; this is not handled here.
 // +------------------------------------------------------------------------------------------------
 sc_cor_std_thread::~sc_cor_std_thread()
 {

@@ -71,6 +71,7 @@ class sc_cor_pthread : public sc_cor
     pthread_t           m_thread;       // Our pthread storage.
     bool                m_started;      // Thread left its start-up wait.
     bool                m_exit;         // Exit without running m_cor_fn.
+    bool                m_exited;       // Thread exited without running it.
 
   private:
 

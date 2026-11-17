@@ -140,6 +140,12 @@ discover_regression_tests()
 
 target_link_libraries(systemc-kernel-sc_suspend PRIVATE Threads::Threads)
 
+# The test checks the detach state of the Posix Threads coroutines
+target_compile_definitions(systemc-kernel-sc_thread_process-pthread_detach
+  PRIVATE $<$<BOOL:${ENABLE_PTHREADS}>:SC_USE_PTHREADS>)
+target_link_libraries(systemc-kernel-sc_thread_process-pthread_detach
+  PRIVATE Threads::Threads)
+
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   # Ignore overly strict -Wfree-nonheap-object warning on GCC 11.0 and later
   # -- https://gcc.gnu.org/bugzilla/show_bug.cgi?id=54202

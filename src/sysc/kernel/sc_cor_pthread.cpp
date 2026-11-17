@@ -62,7 +62,7 @@ namespace sc_core {
 
 sc_cor_pthread::sc_cor_pthread()
     : m_cor_fn( 0 ), m_cor_fn_arg( 0 ), m_pkg_p( 0 )
-    , m_started( false ), m_exit( false )
+    , m_started( false ), m_exit( false ), m_exited( false )
 {
     DEBUGF << this << ": sc_cor_pthread::sc_cor_pthread()" << std::endl;
     pthread_cond_init( &m_pt_condition, PTHREAD_NULL );
@@ -75,10 +75,12 @@ sc_cor_pthread::sc_cor_pthread()
 // A thread that never got control (e.g., a process killed before it ran)
 // is still waiting on m_pt_condition in invoke_module_method(). Destroying
 // a condition variable that has a waiter is undefined behavior and blocks
-// forever with glibc, so release that thread and join it first. A thread
-// that did start is detached. If it is still suspended in yield() (only
-// possible when sc_simcontext::reset() runs with live processes), its
-// condition variable is destroyed with a waiter; this is not handled here.
+// forever with glibc, so tell that thread to exit, wake it, and wait until
+// it has left the wait and no longer uses this object. The thread is
+// detached, so it releases its resources itself when it exits. If a thread
+// that did start is still suspended in yield() (only possible when
+// sc_simcontext::reset() runs with live processes), its condition variable
+// is destroyed with a waiter; this is not handled here.
 
 sc_cor_pthread::~sc_cor_pthread()
 {
@@ -86,15 +88,14 @@ sc_cor_pthread::~sc_cor_pthread()
     if ( m_cor_fn != 0 ) // the main coroutine has no thread of its own
     {
         pthread_mutex_lock( &m_mutex );
-        bool started = m_started;
-        m_exit = !started;
-        if ( !started )
+        if ( !m_started )
+        {
+            m_exit = true;
             pthread_cond_signal( &m_pt_condition );
+            while ( !m_exited )
+                pthread_cond_wait( &m_pt_condition, &m_mutex );
+        }
         pthread_mutex_unlock( &m_mutex );
-        if ( started )
-            pthread_detach( m_thread );
-        else
-            pthread_join( m_thread, 0 );
     }
     pthread_cond_destroy( &m_pt_condition );
     pthread_mutex_destroy( &m_mutex );
@@ -129,6 +130,12 @@ void* sc_cor_pthread::invoke_module_method(void* context_p)
     pthread_cond_wait( &p->m_pt_condition, &p->m_mutex );
     p->m_started = true;
     bool exit = p->m_exit;
+    if ( exit )
+    {
+        // Tell ~sc_cor_pthread() that this thread no longer uses *p.
+        p->m_exited = true;
+        pthread_cond_signal( &p->m_pt_condition );
+    }
     pthread_mutex_unlock( &p->m_mutex );
 
     // EXIT IF THE COROUTINE IS DESTROYED BEFORE IT WAS EVER RESUMED:
@@ -197,10 +204,11 @@ sc_cor_pkg_pthread::create( std::size_t stack_size, sc_cor_fn* fn, void* arg )
     // SET UP THREAD CREATION ATTRIBUTES:
     //
     // Use default values except for stack size. If stack size is non-zero
-    // set it. The thread is joinable; ~sc_cor_pthread() joins or detaches it.
+    // set it.
 
     pthread_attr_t attr;
 	pthread_attr_init( &attr ); 
+	pthread_attr_setdetachstate( &attr, PTHREAD_CREATE_DETACHED );
     if ( stack_size != 0 )
     {
 	pthread_attr_setstacksize( &attr, stack_size );

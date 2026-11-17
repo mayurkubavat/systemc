@@ -61,7 +61,9 @@ namespace sc_core {
 // constructor
 
 sc_cor_pthread::sc_cor_pthread()
-    : m_cor_fn_arg( 0 ), m_pkg_p( 0 )
+    : m_cor_fn( 0 ), m_cor_fn_arg( 0 ), m_pkg_p( 0 )
+    , m_parked( false ), m_started( false ), m_exit( false )
+    , m_exited( false )
 {
     DEBUGF << this << ": sc_cor_pthread::sc_cor_pthread()" << std::endl;
     pthread_cond_init( &m_pt_condition, PTHREAD_NULL );
@@ -70,10 +72,32 @@ sc_cor_pthread::sc_cor_pthread()
 
 
 // destructor
+//
+// A thread that never got control (e.g., a process killed before it ran)
+// is still waiting on m_pt_condition in invoke_module_method(). Destroying
+// a condition variable that has a waiter is undefined behavior and blocks
+// forever with glibc, so tell that thread to exit, wake it, and wait until
+// it has left the wait and no longer uses this object. The thread is
+// detached, so it releases its resources itself when it exits. If a thread
+// that did start is still suspended in yield() (only possible when
+// sc_simcontext::reset() runs with live processes), its condition variable
+// is destroyed with a waiter; this is not handled here.
 
 sc_cor_pthread::~sc_cor_pthread()
 {
     DEBUGF << this << ": sc_cor_pthread::~sc_cor_pthread()" << std::endl;
+    if ( m_cor_fn != 0 ) // the main coroutine has no thread of its own
+    {
+        pthread_mutex_lock( &m_mutex );
+        if ( !m_started )
+        {
+            m_exit = true;
+            pthread_cond_signal( &m_pt_condition );
+            while ( !m_exited )
+                pthread_cond_wait( &m_pt_condition, &m_mutex );
+        }
+        pthread_mutex_unlock( &m_mutex );
+    }
     pthread_cond_destroy( &m_pt_condition );
     pthread_mutex_destroy( &m_mutex );
 }
@@ -98,14 +122,32 @@ void* sc_cor_pthread::invoke_module_method(void* context_p)
     // here so we can control when its execution will occur. We also wake
     // up the main thread which is waiting for this thread to execute to this
     // wait point.
+    //
+    // The flags tested around the waits are set by the signalling thread
+    // while it holds the mutex, so a spurious wake-up does not let either
+    // thread continue early.
 
     pthread_mutex_lock( &p->m_pkg_p->m_create_mtx );
     DEBUGF << p << ": child signalling main thread " << endl;
+    p->m_parked = true;
     pthread_cond_signal( &p->m_pkg_p->m_create_cond );
     pthread_mutex_lock( &p->m_mutex );
     pthread_mutex_unlock( &p->m_pkg_p->m_create_mtx );
-    pthread_cond_wait( &p->m_pt_condition, &p->m_mutex );
+    while ( !p->m_started && !p->m_exit )
+        pthread_cond_wait( &p->m_pt_condition, &p->m_mutex );
+    bool exit = p->m_exit;
+    if ( exit )
+    {
+        // Tell ~sc_cor_pthread() that this thread no longer uses *p.
+        p->m_exited = true;
+        pthread_cond_signal( &p->m_pt_condition );
+    }
     pthread_mutex_unlock( &p->m_mutex );
+
+    // EXIT IF THE COROUTINE IS DESTROYED BEFORE IT WAS EVER RESUMED:
+
+    if ( exit )
+        return 0;
 
 
     // CALL THE SYSTEMC CODE THAT WILL ACTUALLY START THE THREAD OFF:
@@ -208,7 +250,8 @@ sc_cor_pkg_pthread::create( std::size_t stack_size, sc_cor_fn* fn, void* arg )
 
     DEBUGF << &m_main_cor << ": main thread waiting for signal from "
            << cor_p << std::endl;
-    pthread_cond_wait( &m_create_cond, &m_create_mtx );
+    while ( !cor_p->m_parked )
+        pthread_cond_wait( &m_create_cond, &m_create_mtx );
     DEBUGF << &m_main_cor << ": main thread signaled by "
            << cor_p << endl;
     pthread_attr_destroy( &attr );
@@ -235,6 +278,7 @@ sc_cor_pkg_pthread::yield( sc_cor* next_cor_p )
     if ( to_p != from_p )
     {
         pthread_mutex_lock( &to_p->m_mutex );
+        to_p->m_started = true;
         pthread_cond_signal( &to_p->m_pt_condition );
         pthread_mutex_lock( &from_p->m_mutex );
         pthread_mutex_unlock( &to_p->m_mutex );
@@ -256,6 +300,7 @@ sc_cor_pkg_pthread::abort( sc_cor* next_cor_p )
 
     DEBUGF << m_curr_cor << ": aborting, switching to " << n_p << std::endl;
     pthread_mutex_lock( &n_p->m_mutex );
+    n_p->m_started = true;
     pthread_cond_signal( &n_p->m_pt_condition );
     pthread_mutex_unlock( &n_p->m_mutex );
 }

@@ -694,8 +694,13 @@ install (EXPORT SystemCLanguageTargets
 
 # Register the SystemCLanguage and SystemCTLM packages for use from the
 # build tree. (This registers the build tree with the global CMake-registry.)
-export (PACKAGE SystemCLanguage)
-export (PACKAGE SystemCTLM)
+# Only a top-level build is registered: the build tree of a SystemC that is
+# a subproject (e.g., from FetchContent) would be found by the next
+# configure of the parent project, even before its library was built.
+if (PROJECT_IS_TOP_LEVEL)
+  export (PACKAGE SystemCLanguage)
+  export (PACKAGE SystemCTLM)
+endif (PROJECT_IS_TOP_LEVEL)
 
 # Create the <Package>Config.cmake and <Package>ConfigVersion files
 include(CMakePackageConfigHelpers)

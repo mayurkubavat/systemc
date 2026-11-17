@@ -52,7 +52,7 @@ namespace sc_core {
 // +------------------------------------------------------------------------------------------------
 sc_cor_std_thread::sc_cor_std_thread( sc_cor_fn fn, void* arg_p )
     : m_cor_fn( 0 ), m_cor_fn_arg( 0 ), m_pkg_p( 0 ), m_thread_p( 0 )
-    , m_started( false ), m_exit( false )
+    , m_parked( false ), m_started( false ), m_exit( false )
 {
     DEBUGF << this << ": sc_cor_std_thread::sc_cor_std_thread()" << std::endl;
 }
@@ -125,14 +125,18 @@ void sc_cor_std_thread::invoke_thread(void* context_p)
     std::unique_lock<std::mutex> create_lock(p->m_pkg_p->m_create_mutex, std::defer_lock);  
     std::unique_lock<std::mutex> child_lock(p->m_mutex, std::defer_lock);  
 
+    // The flags tested by the waits are set by the notifying thread while
+    // it holds the mutex, so a spurious wake-up does not let either thread
+    // continue early.
+
     DEBUGF << p << ": child signalling main thread " << endl;
     create_lock.lock();
+    p->m_parked = true;
     p->m_pkg_p->m_create_cond.notify_one();
     DEBUGF << p << ": child waiting to be invoked " << endl;
     child_lock.lock();
     create_lock.unlock();
-    p->m_condition.wait(child_lock);
-    p->m_started = true;
+    p->m_condition.wait(child_lock, [p] { return p->m_started || p->m_exit; });
     bool exit = p->m_exit;
     child_lock.unlock();
 
@@ -235,7 +239,7 @@ sc_cor_pkg_std_thread::create( std::size_t stack_size, sc_cor_fn* fn, void* arg 
 
     DEBUGF << &m_main_cor << ": main thread waiting for signal from "
            << cor_p << std::endl;
-    m_create_cond.wait(create_lock);
+    m_create_cond.wait(create_lock, [cor_p] { return cor_p->m_parked; });
     create_lock.unlock();
     
     DEBUGF << &m_main_cor << ": exiting sc_cor_pkg_std_thread::create("
@@ -270,6 +274,7 @@ sc_cor_pkg_std_thread::yield( sc_cor* next_cor_p )
 	std::unique_lock<std::mutex> from_lock(from_p->m_mutex,std::defer_lock);
 
 	to_lock.lock();
+	to_p->m_started = true;
 	to_p->m_condition.notify_one();
 	from_lock.lock();
 	to_lock.unlock();
@@ -292,6 +297,7 @@ sc_cor_pkg_std_thread::abort( sc_cor* next_cor_p )
     DEBUGF << m_curr_cor << ": aborting, switching to " << n_p << std::endl;
     {
 	std::unique_lock<std::mutex> to_lock(n_p->m_mutex);
+	n_p->m_started = true;
 	n_p->m_condition.notify_one();
     }
 }

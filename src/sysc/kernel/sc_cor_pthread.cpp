@@ -62,7 +62,8 @@ namespace sc_core {
 
 sc_cor_pthread::sc_cor_pthread()
     : m_cor_fn( 0 ), m_cor_fn_arg( 0 ), m_pkg_p( 0 )
-    , m_started( false ), m_exit( false ), m_exited( false )
+    , m_parked( false ), m_started( false ), m_exit( false )
+    , m_exited( false )
 {
     DEBUGF << this << ": sc_cor_pthread::sc_cor_pthread()" << std::endl;
     pthread_cond_init( &m_pt_condition, PTHREAD_NULL );
@@ -121,14 +122,19 @@ void* sc_cor_pthread::invoke_module_method(void* context_p)
     // here so we can control when its execution will occur. We also wake
     // up the main thread which is waiting for this thread to execute to this
     // wait point.
+    //
+    // The flags tested around the waits are set by the signalling thread
+    // while it holds the mutex, so a spurious wake-up does not let either
+    // thread continue early.
 
     pthread_mutex_lock( &p->m_pkg_p->m_create_mtx );
     DEBUGF << p << ": child signalling main thread " << endl;
+    p->m_parked = true;
     pthread_cond_signal( &p->m_pkg_p->m_create_cond );
     pthread_mutex_lock( &p->m_mutex );
     pthread_mutex_unlock( &p->m_pkg_p->m_create_mtx );
-    pthread_cond_wait( &p->m_pt_condition, &p->m_mutex );
-    p->m_started = true;
+    while ( !p->m_started && !p->m_exit )
+        pthread_cond_wait( &p->m_pt_condition, &p->m_mutex );
     bool exit = p->m_exit;
     if ( exit )
     {
@@ -244,7 +250,8 @@ sc_cor_pkg_pthread::create( std::size_t stack_size, sc_cor_fn* fn, void* arg )
 
     DEBUGF << &m_main_cor << ": main thread waiting for signal from "
            << cor_p << std::endl;
-    pthread_cond_wait( &m_create_cond, &m_create_mtx );
+    while ( !cor_p->m_parked )
+        pthread_cond_wait( &m_create_cond, &m_create_mtx );
     DEBUGF << &m_main_cor << ": main thread signaled by "
            << cor_p << endl;
     pthread_attr_destroy( &attr );
@@ -271,6 +278,7 @@ sc_cor_pkg_pthread::yield( sc_cor* next_cor_p )
     if ( to_p != from_p )
     {
         pthread_mutex_lock( &to_p->m_mutex );
+        to_p->m_started = true;
         pthread_cond_signal( &to_p->m_pt_condition );
         pthread_mutex_lock( &from_p->m_mutex );
         pthread_mutex_unlock( &to_p->m_mutex );
@@ -292,6 +300,7 @@ sc_cor_pkg_pthread::abort( sc_cor* next_cor_p )
 
     DEBUGF << m_curr_cor << ": aborting, switching to " << n_p << std::endl;
     pthread_mutex_lock( &n_p->m_mutex );
+    n_p->m_started = true;
     pthread_cond_signal( &n_p->m_pt_condition );
     pthread_mutex_unlock( &n_p->m_mutex );
 }

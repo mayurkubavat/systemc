@@ -69,7 +69,8 @@ class sc_cor_pthread : public sc_cor
     sc_cor_pkg_pthread* m_pkg_p;        // the creating coroutine package
     pthread_cond_t      m_pt_condition; // Condition waiting for.
     pthread_t           m_thread;       // Our pthread storage.
-    bool                m_started;      // Thread left its start-up wait.
+    bool                m_parked;       // Thread reached its start-up wait.
+    bool                m_started;      // Thread was resumed.
     bool                m_exit;         // Exit without running m_cor_fn.
     bool                m_exited;       // Thread exited without running it.
 

@@ -130,6 +130,10 @@ class SC_API sc_process_handle {
 
   public: // implementation specific methods:
     inline std::string dump_state() const;
+    inline bool is_power_gated() const
+        { return m_target_p ? m_target_p->is_power_gated() : false; }
+    inline void set_power_gated( bool gated, bool retrigger_combinational = true )
+        { if ( m_target_p ) m_target_p->set_power_gated( gated, retrigger_combinational ); }
 
   protected:
     inline bool dont_initialize() const

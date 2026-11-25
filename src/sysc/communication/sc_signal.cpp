@@ -96,6 +96,7 @@ sc_writer_policy_check_port::
 sc_signal_channel::~sc_signal_channel()
 {
     delete m_change_event_p;
+    delete m_power_ext_p;
 }
 
 void
@@ -170,6 +171,9 @@ void
 sc_signal<bool,POL>::update()
 {
     policy_type::update();
+    if( SC_UNLIKELY_( this->has_active_power_policy() ) ) {
+        base_type::apply_power_policy();
+    }
     if( !( base_type::m_new_val == base_type::m_cur_val ) ) {
         do_update();
     }
@@ -234,6 +238,9 @@ void
 sc_signal<sc_logic,POL>::update()
 {
     policy_type::update();
+    if( SC_UNLIKELY_( this->has_active_power_policy() ) ) {
+        base_type::apply_power_policy();
+    }
     if( !( base_type::m_new_val == base_type::m_cur_val ) ) {
         do_update();
     }

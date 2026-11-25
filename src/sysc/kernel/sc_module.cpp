@@ -92,6 +92,7 @@ sc_module::sc_module_init()
     simcontext()->hierarchy_push( this );
     m_end_module_called = false;
     m_module_name_p = 0;
+    m_power_domain_p = 0;
     m_port_vec = new std::vector<sc_port_base*>;
     m_port_index = 0;
 }

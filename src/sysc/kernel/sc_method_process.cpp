@@ -636,7 +636,7 @@ bool sc_method_process::trigger_dynamic( sc_event* e )
     // But if this is a time out event we need to remove both it and the
     // event that was being waited for.
 
-    if ( m_state & ps_bit_disabled )
+    if ( (m_state & ps_bit_disabled) || SC_UNLIKELY_( m_power_gated ) )
     {
         if ( e == m_timeout_event_p )
 	{

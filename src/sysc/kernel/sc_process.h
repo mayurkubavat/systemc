@@ -287,6 +287,8 @@ class SC_API sc_process_b : public sc_object_host {
     inline int current_state() { return m_state; }
     bool dont_initialize() const { return m_dont_init; }
     virtual void dont_initialize( bool dont );
+    bool is_power_gated() const { return m_power_gated; }
+    void set_power_gated( bool gated, bool retrigger_combinational = true );
     std::string dump_state() const;
     inline sc_curr_proc_kind proc_kind() const;
     sc_event& reset_event();
@@ -399,6 +401,7 @@ class SC_API sc_process_b : public sc_object_host {
                                                     // be suspended
     bool                         m_suspend_all_req; // This process is
                                                     // requesting global suspension.
+    bool                         m_power_gated;     // Process suppressed by power domain OFF.
 
   protected:
     static sc_process_b* m_last_created_process_p; // Last process created.
@@ -604,6 +607,8 @@ private:
 };
 inline void sc_process_b::semantics()
 {
+    if ( SC_UNLIKELY_( !m_is_thread && m_power_gated ) )
+        return;
 
     // within this function, the process has a stack associated
 

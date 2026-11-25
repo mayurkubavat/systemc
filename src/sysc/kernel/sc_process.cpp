@@ -564,7 +564,8 @@ sc_process_b::sc_process_b( const char* name_p, bool is_thread, bool free_host,
     m_trigger_type(STATIC),
     m_unwinding(false),
     m_unsuspendable(false),
-    m_suspend_all_req(false)
+    m_suspend_all_req(false),
+    m_power_gated(false)
 {
     // Check spawn phase: m_ready_to_simulate is set *after* elaboration_done()
     unsigned spawned = SPAWN_ELAB;
@@ -576,6 +577,29 @@ sc_process_b::sc_process_b( const char* name_p, bool is_thread, bool free_host,
 
     m_last_created_process_p = this;
     m_timeout_event_p = new sc_event( sc_event::kernel_event, "free_event" );
+}
+
+//------------------------------------------------------------------------------
+//"sc_process_b::set_power_gated"
+//
+// Suppress or restore scheduling of this process due to power-domain state,
+// orthogonal to user disable()/enable() and suspend()/resume() state bits.
+//------------------------------------------------------------------------------
+void sc_process_b::set_power_gated( bool gated, bool retrigger_combinational )
+{
+    if ( m_power_gated == gated )
+        return;
+
+    m_power_gated = gated;
+
+    if ( !gated && retrigger_combinational &&
+         m_process_kind == SC_METHOD_PROC_ &&
+         !m_dont_init &&
+         sc_is_running() )
+    {
+        sc_method_handle method_h = static_cast<sc_method_handle>( this );
+        method_h->trigger_static();
+    }
 }
 
 //------------------------------------------------------------------------------

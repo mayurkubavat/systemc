@@ -46,6 +46,7 @@
 
 namespace sc_core {
 
+class sc_domain_policy_if;
 class sc_name_gen;
 template<class T> class sc_in;
 template<class T> class sc_inout;
@@ -318,8 +319,14 @@ private:
     int                         m_port_index;
     sc_name_gen*                m_name_gen;
     sc_module_name*             m_module_name_p;
+    sc_domain_policy_if*        m_power_domain_p;
 
 public:
+
+    void set_power_domain_policy( sc_domain_policy_if* policy_p )
+        { m_power_domain_p = policy_p; }
+    sc_domain_policy_if* get_power_domain_policy() const
+        { return m_power_domain_p; }
 
     void defunct() { }
 

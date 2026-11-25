@@ -51,7 +51,8 @@ namespace sc_core {
 // | other than initialize some fields. The real work occurs in sc_cor_pkg_std_thread::create().
 // +------------------------------------------------------------------------------------------------
 sc_cor_std_thread::sc_cor_std_thread( sc_cor_fn fn, void* arg_p )
-    : m_cor_fn_arg( 0 ), m_pkg_p( 0 )
+    : m_cor_fn( 0 ), m_cor_fn_arg( 0 ), m_pkg_p( 0 ), m_thread_p( 0 )
+    , m_parked( false ), m_started( false ), m_exit( false )
 {
     DEBUGF << this << ": sc_cor_std_thread::sc_cor_std_thread()" << std::endl;
 }
@@ -62,11 +63,37 @@ sc_cor_std_thread::sc_cor_std_thread( sc_cor_fn fn, void* arg_p )
 // | 
 // | This is the object instance destructor for this object type. It detaches and frees the 
 // | std::thread associated with this object instance.
+// |
+// | Notes:
+// |   (1) A thread that never got control (e.g., a process killed before it ran) is still
+// |       waiting on m_condition in invoke_thread(). Destroying a condition variable that has
+// |       a waiter is undefined behavior and blocks forever with glibc, so release that thread
+// |       and join it before the members are destroyed.
+// |   (2) A thread that did start is detached. If it is still suspended in yield() (only
+// |       possible when sc_simcontext::reset() runs with live processes), its condition
+// |       variable is destroyed with a waiter; this is not handled here.
 // +------------------------------------------------------------------------------------------------
 sc_cor_std_thread::~sc_cor_std_thread()
 {
     DEBUGF << this << ": sc_cor_std_thread::~sc_cor_std_thread()" << std::endl;
-    m_thread_p->detach(); 
+    if ( m_thread_p == 0 )
+        return;
+
+    bool started;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        started = m_started;
+        m_exit = !started;
+    }
+    if ( started )
+    {
+        m_thread_p->detach();
+    }
+    else
+    {
+        m_condition.notify_one();
+        m_thread_p->join();
+    }
     delete m_thread_p; 
 }
 
@@ -98,14 +125,25 @@ void sc_cor_std_thread::invoke_thread(void* context_p)
     std::unique_lock<std::mutex> create_lock(p->m_pkg_p->m_create_mutex, std::defer_lock);  
     std::unique_lock<std::mutex> child_lock(p->m_mutex, std::defer_lock);  
 
+    // The flags tested by the waits are set by the notifying thread while
+    // it holds the mutex, so a spurious wake-up does not let either thread
+    // continue early.
+
     DEBUGF << p << ": child signalling main thread " << endl;
     create_lock.lock();
+    p->m_parked = true;
     p->m_pkg_p->m_create_cond.notify_one();
     DEBUGF << p << ": child waiting to be invoked " << endl;
     child_lock.lock();
     create_lock.unlock();
-    p->m_condition.wait(child_lock);
+    p->m_condition.wait(child_lock, [p] { return p->m_started || p->m_exit; });
+    bool exit = p->m_exit;
     child_lock.unlock();
+
+    // EXIT IF THE COROUTINE IS DESTROYED BEFORE IT WAS EVER RESUMED:
+
+    if ( exit )
+        return;
 
     // CALL THE SYSTEMC CODE THAT WILL ACTUALLY START THE THREAD OFF:
 
@@ -202,7 +240,7 @@ sc_cor_pkg_std_thread::create( std::size_t stack_size, sc_cor_fn* fn, void* arg 
 
     DEBUGF << &m_main_cor << ": main thread waiting for signal from "
            << cor_p << std::endl;
-    m_create_cond.wait(create_lock);
+    m_create_cond.wait(create_lock, [cor_p] { return cor_p->m_parked; });
     create_lock.unlock();
     
     DEBUGF << &m_main_cor << ": exiting sc_cor_pkg_std_thread::create("
@@ -237,6 +275,7 @@ sc_cor_pkg_std_thread::yield( sc_cor* next_cor_p )
 	std::unique_lock<std::mutex> from_lock(from_p->m_mutex,std::defer_lock);
 
 	to_lock.lock();
+	to_p->m_started = true;
 	to_p->m_condition.notify_one();
 	from_lock.lock();
 	to_lock.unlock();
@@ -259,6 +298,7 @@ sc_cor_pkg_std_thread::abort( sc_cor* next_cor_p )
     DEBUGF << m_curr_cor << ": aborting, switching to " << n_p << std::endl;
     {
 	std::unique_lock<std::mutex> to_lock(n_p->m_mutex);
+	n_p->m_started = true;
 	n_p->m_condition.notify_one();
     }
 }

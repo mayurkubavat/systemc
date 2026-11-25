@@ -1,0 +1,7 @@
+SystemC Simulation
+0 s static thread: detached
+1 ns static thread after wait: detached
+1 ns spawned thread: detached
+2 ns spawned thread: detached
+3 ns spawned thread: detached
+processes kept: 3

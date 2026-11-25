@@ -321,6 +321,7 @@ set(SYSTEMC_CORE_SRC
         sysc/kernel/sc_module.h
         sysc/kernel/sc_module_name.h
         sysc/kernel/sc_object.h
+        sysc/kernel/sc_power_policy_if.h
         sysc/kernel/sc_process.h
         sysc/kernel/sc_process_handle.h
         sysc/kernel/sc_runnable.h

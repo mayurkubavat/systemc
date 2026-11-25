@@ -38,6 +38,7 @@
 #include "sysc/kernel/sc_sensitive.h"
 #include "sysc/kernel/sc_process_handle.h"
 #include "sysc/kernel/sc_event.h"
+#include <cstring>
 #include <sstream>
 
 namespace sc_core {
@@ -47,8 +48,9 @@ namespace sc_core {
 // Note the special name for 'non_event' - this makes sure it does not
 // appear as a named event.
 
-std::vector<sc_event*>  sc_process_handle::empty_event_vector;
-std::vector<sc_object*> sc_process_handle::empty_object_vector;
+std::vector<sc_event*>        sc_process_handle::empty_event_vector;
+std::vector<const sc_event*>  sc_process_handle::empty_const_event_vector;
+std::vector<sc_object*>       sc_process_handle::empty_object_vector;
 sc_event&               sc_process_handle::non_event() { return sc_get_curr_simcontext()->null_event(); }
 
 // Last process that was created:
@@ -564,7 +566,8 @@ sc_process_b::sc_process_b( const char* name_p, bool is_thread, bool free_host,
     m_trigger_type(STATIC),
     m_unwinding(false),
     m_unsuspendable(false),
-    m_suspend_all_req(false)
+    m_suspend_all_req(false),
+    m_power_gated(false)
 {
     // Check spawn phase: m_ready_to_simulate is set *after* elaboration_done()
     unsigned spawned = SPAWN_ELAB;
@@ -576,6 +579,55 @@ sc_process_b::sc_process_b( const char* name_p, bool is_thread, bool free_host,
 
     m_last_created_process_p = this;
     m_timeout_event_p = new sc_event( sc_event::kernel_event, "free_event" );
+}
+
+//------------------------------------------------------------------------------
+//"sc_process_b::set_power_gated"
+//
+// Suppress or restore scheduling of this process due to power-domain state,
+// orthogonal to user disable()/enable() and suspend()/resume() state bits.
+//------------------------------------------------------------------------------
+void sc_process_b::set_power_gated( bool gated, bool retrigger_combinational )
+{
+    if ( m_power_gated == gated )
+        return;
+
+    m_power_gated = gated;
+
+    if ( !gated && retrigger_combinational &&
+         m_process_kind == SC_METHOD_PROC_ &&
+         !m_dont_init &&
+         sc_is_running() )
+    {
+        sc_method_handle method_h = static_cast<sc_method_handle>( this );
+        method_h->trigger_static();
+    }
+}
+
+bool sc_process_b::has_edge_sensitivity() const
+{
+    if ( m_process_kind == SC_CTHREAD_PROC_ )
+        return true;
+    if ( m_has_reset_signal || !m_resets.empty() )
+        return true;
+    for ( std::size_t i = 0; i < m_static_events.size(); ++i ) {
+        const sc_event* ev = m_static_events[i];
+        if ( !ev )
+            continue;
+        const char* nm = ev->name();
+        const std::size_t len = nm ? std::strlen( nm ) : 0;
+        if ( len >= 14 &&
+             ( std::strcmp( nm + len - 14, "_posedge_event" ) == 0 ||
+               std::strcmp( nm + len - 14, "_negedge_event" ) == 0 ) )
+        {
+            return true;
+        }
+        if ( const sc_object* par = ev->get_parent_object() ) {
+            if ( std::strcmp( par->kind(), "sc_clock" ) == 0 )
+                return true;
+        }
+    }
+    return false;
 }
 
 //------------------------------------------------------------------------------

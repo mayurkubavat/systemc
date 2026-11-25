@@ -77,6 +77,7 @@ struct SC_API sc_writer_policy_nocheck_write
     { return true; }
   bool needs_update() const { return false; }
   void update() {}
+  sc_process_b* last_writer_proc() const { return 0; }
 };
 
 struct SC_API sc_writer_policy_check_write
@@ -84,6 +85,8 @@ struct SC_API sc_writer_policy_check_write
   bool check_write( sc_object* target, bool value_changed );
   bool needs_update() const { return m_delta_only; }
   void update();
+  sc_process_b* last_writer_proc() const
+    { return const_cast<sc_process_handle&>( m_writer_p ); }
 
 private:
   static bool only_delta();

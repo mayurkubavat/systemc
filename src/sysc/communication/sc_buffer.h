@@ -120,6 +120,9 @@ void
 sc_buffer<T,POL>::update()
 {
     base_type::policy_type::update();
+    if( SC_UNLIKELY_( this->has_active_power_policy() ) ) {
+        base_type::apply_power_policy();
+    }
     base_type::do_update();
 }
 

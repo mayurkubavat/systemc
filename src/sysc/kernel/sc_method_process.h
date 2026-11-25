@@ -107,6 +107,7 @@ class sc_method_process : public sc_process_b {
     friend class sc_event;
     friend class sc_invoke_method;
     friend class sc_module;
+    friend class sc_process_b;
     friend class sc_process_table;
     friend class sc_process_handle;
     friend class sc_simcontext;
@@ -342,7 +343,8 @@ inline
 void
 sc_method_process::trigger_static()
 {
-    if ( (m_state & ps_bit_disabled) || is_runnable() ||
+    if ( SC_UNLIKELY_( m_power_gated ) ||
+         (m_state & ps_bit_disabled) || is_runnable() ||
           m_trigger_type != STATIC )
         return;
 

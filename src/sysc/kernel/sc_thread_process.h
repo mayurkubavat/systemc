@@ -479,7 +479,8 @@ sc_thread_process::trigger_static()
     //    (c) it is waiting on a dynamic event
     //    (d) its wait count is not satisfied and it is not currently in reset
 
-    if ( (m_state & ps_bit_disabled) || is_runnable() ||
+    if ( SC_UNLIKELY_( m_power_gated ) ||
+         (m_state & ps_bit_disabled) || is_runnable() ||
           m_trigger_type != STATIC )
         return;
 

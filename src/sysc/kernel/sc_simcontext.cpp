@@ -762,9 +762,11 @@ sc_simcontext::prepare_to_simulate()
 	  method_p; method_p = method_p->next_exist() )
     {
 	if ( ((method_p->m_state & sc_process_b::ps_bit_disabled) != 0) ||
+	     method_p->is_power_gated() ||
 	     method_p->dont_initialize() )
 	{
-	    if ( method_p->m_static_events.size() == 0 )
+	    if ( method_p->m_static_events.size() == 0 &&
+	         !method_p->is_power_gated() )
 	    {
 	        SC_REPORT_WARNING( SC_ID_DISABLE_WILL_ORPHAN_PROCESS_,
 		                   method_p->name() );
@@ -788,9 +790,11 @@ sc_simcontext::prepare_to_simulate()
 	  thread_p; thread_p = thread_p->next_exist() )
     {
 	if ( ((thread_p->m_state & sc_process_b::ps_bit_disabled) != 0) ||
+	     thread_p->is_power_gated() ||
 	     thread_p->dont_initialize() )
 	{
-	    if ( thread_p->m_static_events.size() == 0 )
+	    if ( thread_p->m_static_events.size() == 0 &&
+	         !thread_p->is_power_gated() )
 	    {
 	        SC_REPORT_WARNING( SC_ID_DISABLE_WILL_ORPHAN_PROCESS_,
 		                   thread_p->name() );

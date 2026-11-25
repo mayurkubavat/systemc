@@ -34,6 +34,7 @@
 #include "sysc/communication/sc_signal_ifs.h"
 #include "sysc/communication/sc_writer_policy.h"
 #include "sysc/kernel/sc_event.h"
+#include "sysc/kernel/sc_power_policy_if.h"
 #include "sysc/kernel/sc_process.h"
 #include "sysc/kernel/sc_simcontext.h"
 #include "sysc/datatypes/bit/sc_logic.h"
@@ -89,11 +90,26 @@ protected:
       : sc_prim_channel( name_ )
       , m_change_event_p( 0 )
       , m_change_stamp( ~sc_dt::UINT64_ONE )
+      , m_power_ext_p( 0 )
     {}
 
 public:
 
     virtual ~sc_signal_channel();
+
+    // on-demand low-power kernel policy hooks
+    virtual void set_power_policy( sc_channel_power_if* /*policy_p*/ ) {}
+    sc_channel_power_if* get_power_policy() const
+        { return m_power_ext_p ? m_power_ext_p->policy() : 0; }
+    bool has_active_power_policy() const
+        { return m_power_ext_p != 0 && m_power_ext_p->is_active(); }
+    sc_process_b* power_last_writer() const
+        { return m_power_ext_p ? m_power_ext_p->last_writer() : 0; }
+    virtual void power_capture_retention() {}
+    virtual void power_corrupt_retention( sc_dt::uint64 /*seed*/ ) {}
+    virtual void power_capture_isolation_latch() {}
+    void trigger_power_update()
+        { request_update(); }
 
     // interface methods
 
@@ -125,8 +141,9 @@ protected:
         { if( ev ) ev->notify_next_delta(); }
 
 protected:
-    mutable sc_event* m_change_event_p;  // value change event if present.
-    sc_dt::uint64     m_change_stamp;    // delta of last event
+    mutable sc_event*                        m_change_event_p;  // value change event if present.
+    sc_dt::uint64                            m_change_stamp;    // delta of last event
+    sc_power_detail::sc_signal_power_ext_base* m_power_ext_p;   // optional low-power extension
 
 private:
     // disabled
@@ -252,11 +269,17 @@ public:
     virtual void print( ::std::ostream& = ::std::cout ) const;
     virtual void dump( ::std::ostream& = ::std::cout ) const;
 
+    virtual void set_power_policy( sc_channel_power_if* policy_p );
+    virtual void power_capture_retention();
+    virtual void power_corrupt_retention( sc_dt::uint64 seed );
+    virtual void power_capture_isolation_latch();
+
 
 protected:
 
     virtual void update();
             void do_update();
+            void apply_power_policy();
 
 protected:
     T m_cur_val;         // current value of object.
@@ -294,6 +317,10 @@ sc_signal_t<T,POL>::write( const T& value_ )
         return;
 
     m_new_val = value_;
+    if ( SC_UNLIKELY_( this->m_power_ext_p != 0 ) ) {
+        this->m_power_ext_p->set_last_writer(
+            sc_get_curr_simcontext()->get_current_writer() );
+    }
     if( value_changed || policy_type::needs_update() ) {
         request_update();
     }
@@ -320,9 +347,84 @@ sc_signal_t<T,POL>::dump( ::std::ostream& os ) const
 
 template< class T, sc_writer_policy POL >
 void
+sc_signal_t<T,POL>::set_power_policy( sc_channel_power_if* policy_p )
+{
+    if ( !policy_p ) {
+        delete this->m_power_ext_p;
+        this->m_power_ext_p = 0;
+        return;
+    }
+    if ( !this->m_power_ext_p ) {
+        this->m_power_ext_p =
+            new sc_power_detail::sc_signal_power_ext<T>( policy_p, m_cur_val );
+    } else {
+        this->m_power_ext_p->set_policy( policy_p );
+    }
+    if ( sc_process_b* wr_p = policy_type::last_writer_proc() ) {
+        this->m_power_ext_p->set_last_writer( wr_p );
+    }
+}
+
+template< class T, sc_writer_policy POL >
+void
+sc_signal_t<T,POL>::power_capture_retention()
+{
+    if ( this->m_power_ext_p ) {
+        static_cast<sc_power_detail::sc_signal_power_ext<T>*>(
+            this->m_power_ext_p )->m_retained_val = m_cur_val;
+    }
+}
+
+template< class T, sc_writer_policy POL >
+void
+sc_signal_t<T,POL>::power_corrupt_retention( sc_dt::uint64 seed )
+{
+    if ( this->m_power_ext_p ) {
+        auto* ext_p = static_cast<sc_power_detail::sc_signal_power_ext<T>*>(
+            this->m_power_ext_p );
+        sc_power_detail::apply_action_value<T>(
+            SC_PWR_CORRUPT_SCRAMBLE,
+            ext_p->m_retained_val,
+            ext_p->m_retained_val,
+            ext_p->m_retained_val,
+            ext_p->m_latched_val,
+            seed );
+    }
+}
+
+template< class T, sc_writer_policy POL >
+void
+sc_signal_t<T,POL>::power_capture_isolation_latch()
+{
+    if ( this->m_power_ext_p ) {
+        static_cast<sc_power_detail::sc_signal_power_ext<T>*>(
+            this->m_power_ext_p )->m_latched_val = m_cur_val;
+    }
+}
+
+template< class T, sc_writer_policy POL >
+inline void
+sc_signal_t<T,POL>::apply_power_policy()
+{
+    auto* ext_p = static_cast<sc_power_detail::sc_signal_power_ext<T>*>(
+        this->m_power_ext_p );
+    sc_dt::uint64 seed = 0;
+    const bool value_changing = !( m_new_val == m_cur_val );
+    const sc_power_action act =
+        ext_p->policy()->evaluate_power_action( this, seed, value_changing );
+    sc_power_detail::apply_action_value<T>(
+        act, m_new_val, m_cur_val,
+        ext_p->m_retained_val, ext_p->m_latched_val, seed );
+}
+
+template< class T, sc_writer_policy POL >
+void
 sc_signal_t<T,POL>::update()
 {
     policy_type::update();
+    if( SC_UNLIKELY_( this->has_active_power_policy() ) ) {
+        apply_power_policy();
+    }
     if( !( m_new_val == m_cur_val ) ) {
         do_update();
     }

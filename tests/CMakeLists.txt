@@ -136,6 +136,17 @@ endfunction()
 discover_regression_tests()
 
 ###############################################################################
+# Tests that cannot pass in specific configurations
+
+if (ENABLE_STD_THREADS)
+  # std::thread provides no way to set the stack size of a thread, so the
+  # stack size requested via set_stack_size() is ignored. The thread gets
+  # the platform default stack instead, which is too small for this test
+  # on some platforms (e.g., 512 KiB on macOS).
+  skip_test(systemc/kernel/sc_module/test10)
+endif (ENABLE_STD_THREADS)
+
+###############################################################################
 # Additional compile/link options for specific tests
 
 target_link_libraries(systemc-kernel-sc_suspend PRIVATE Threads::Threads)

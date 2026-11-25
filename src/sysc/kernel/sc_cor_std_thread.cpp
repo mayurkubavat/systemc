@@ -159,8 +159,9 @@ sc_cor_pkg_std_thread::~sc_cor_pkg_std_thread()
 // | the execution of the thread.
 // |
 // | Notes:
-// |   (1) The stack information is currently ignored as the std::thread package supplies an
-// |       8 MB stack by default. 
+// |   (1) The stack information is ignored as std::thread provides no way to set the stack
+// |       size. Each thread gets the platform default stack size: on Linux with glibc it is
+// |       derived from the stack limit (ulimit -s, typically 8 MB), on macOS it is 512 KB.
 // |
 // | Arguments:
 // |   stack_size = size of the stack to create for the co-routine. (Ignored see note 1 above)

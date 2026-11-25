@@ -524,10 +524,11 @@ install(TARGETS ${SYSTEMC_TARGETS} EXPORT SystemCLanguageTargets
 # Install rules for SystemC library
 ###############################################################################
 
-# Export targets to build tree root
+# Export targets to the project build directory, next to the build tree
+# SystemCLanguageConfig.cmake that includes this file
 export (TARGETS ${SYSTEMC_TARGETS}
         NAMESPACE SystemC::
-        FILE ${CMAKE_BINARY_DIR}/SystemCLanguageTargets.cmake)
+        FILE ${PROJECT_BINARY_DIR}/SystemCLanguageTargets.cmake)
 
 # Install the SystemC and TLM headers
 install (FILES systemc tlm

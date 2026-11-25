@@ -82,6 +82,7 @@ SC_MODULE( gated_rtl_block )
     sc_signal<sc_uint<16>>       comb_out{ "comb_out" };
     sc_signal<bool>              irq_out{ "irq_out" };
     sc_signal<sc_lv<8>>          bus_lv{ "bus_lv" };
+    sc_signal_rv<8>              tri_rv{ "tri_rv" };
 
     sc_process_handle seq_h;
     sc_process_handle comb_h;
@@ -106,6 +107,7 @@ SC_MODULE( gated_rtl_block )
         cnt_reg.write( cnt_reg.read() + 1 );
         irq_out.write( true );
         bus_lv.write( "10100101" );
+        tri_rv.write( "11001100" );
     }
 
     void comb_proc()
@@ -150,23 +152,34 @@ int sc_main( int, char*[] )
     dut.set_power_domain_policy( &dom );
     sc_assert( dut.get_power_domain_policy() == &dom );
 
-    test_channel_policy cfg_pol, cnt_pol, irq_pol, lv_pol;
+    test_channel_policy cfg_pol, cnt_pol, irq_pol, lv_pol, rv_pol, comb_pol;
     dut.cfg_reg.set_power_policy( &cfg_pol );
     dut.cnt_reg.set_power_policy( &cnt_pol );
     dut.irq_out.set_power_policy( &irq_pol );
     dut.bus_lv.set_power_policy( &lv_pol );
+    dut.tri_rv.set_power_policy( &rv_pol );
+    dut.comb_out.set_power_policy( &comb_pol );
 
     // 1. Run 3 active clock cycles (25 ns: posedges at 0, 10, 20 ns)
     sc_start( 25, SC_NS );
+    sc_assert( dut.seq_h.has_edge_sensitivity() );
+    sc_assert( !dut.comb_h.has_edge_sensitivity() );
+    sc_assert( dut.comb_out.power_last_writer() != nullptr );
+    sc_assert( !dut.comb_out.power_last_writer()->has_edge_sensitivity() );
+    sc_assert( dut.cnt_reg.power_last_writer() != nullptr );
+    sc_assert( dut.cnt_reg.power_last_writer()->has_edge_sensitivity() );
+
     std::cout << "active: cfg=0x" << std::hex << dut.cfg_reg.read().to_uint()
               << " cnt=" << std::dec << dut.cnt_reg.read().to_uint()
               << " comb=0x" << std::hex << dut.comb_out.read().to_uint()
               << " irq=" << std::dec << dut.irq_out.read()
-              << " lv=" << dut.bus_lv.read() << std::endl;
+              << " lv=" << dut.bus_lv.read()
+              << " rv=" << dut.tri_rv.read() << std::endl;
 
-    // 2. Save cfg_reg, isolate irq_out to 0, corrupt domain, and gate processes
+    // 2. Save cfg_reg, isolate irq_out to 0 and tri_rv to Z, corrupt domain, and gate processes
     dut.cfg_reg.power_capture_retention();
     irq_pol.configure( SC_PWR_CLAMP_ZERO );
+    rv_pol.configure( SC_PWR_CLAMP_Z );
     cfg_pol.configure( SC_PWR_CORRUPT_FLIP );
     cnt_pol.configure( SC_PWR_CORRUPT_FLIP );
     lv_pol.configure( SC_PWR_CORRUPT_FLIP );
@@ -179,6 +192,7 @@ int sc_main( int, char*[] )
     dut.cnt_reg.trigger_power_update();
     dut.irq_out.trigger_power_update();
     dut.bus_lv.trigger_power_update();
+    dut.tri_rv.trigger_power_update();
 
     // Advance 30 ns while OFF (posedges at 30, 40, 50 ns): seq_proc must NOT run
     sc_start( 30, SC_NS );
@@ -186,6 +200,7 @@ int sc_main( int, char*[] )
               << " cnt=0x" << dut.cnt_reg.read().to_uint()
               << " irq=" << std::dec << dut.irq_out.read()
               << " lv=" << dut.bus_lv.read()
+              << " rv=" << dut.tri_rv.read()
               << " neg_cnt=" << watcher.neg_cnt << std::endl;
 
     // 3. Power-up at 55 ns: clear cnt_reg (POR), restore cfg_reg, ungate processes, release isolation
@@ -193,8 +208,10 @@ int sc_main( int, char*[] )
     cfg_pol.configure( SC_PWR_RESTORE_RETAINED );
     cnt_pol.configure( SC_PWR_CORRUPT_ZERO );
     lv_pol.configure( SC_PWR_NORMAL );
+    rv_pol.configure( SC_PWR_NORMAL );
     dut.cfg_reg.trigger_power_update();
     dut.cnt_reg.trigger_power_update();
+    dut.tri_rv.trigger_power_update();
     sc_start( SC_ZERO_TIME );
 
     cnt_pol.configure( SC_PWR_NORMAL );
@@ -212,8 +229,17 @@ int sc_main( int, char*[] )
     std::cout << "resumed: cfg=0x" << std::hex << dut.cfg_reg.read().to_uint()
               << " cnt=" << std::dec << dut.cnt_reg.read().to_uint()
               << " comb=0x" << std::hex << dut.comb_out.read().to_uint()
-              << " irq=" << dut.irq_out.read()
+              << " irq=" << std::dec << dut.irq_out.read()
+              << " rv=" << dut.tri_rv.read()
               << " pos_cnt=" << watcher.pos_cnt << std::endl;
+
+    // 5. Verify retention corruption helper
+    dut.cnt_reg.power_capture_retention();
+    dut.cnt_reg.power_corrupt_retention( 0x1234ULL );
+    cnt_pol.configure( SC_PWR_RESTORE_RETAINED );
+    dut.cnt_reg.trigger_power_update();
+    sc_start( SC_ZERO_TIME );
+    sc_assert( dut.cnt_reg.read().to_uint() != 1 );
 
     return 0;
 }

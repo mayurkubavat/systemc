@@ -47,12 +47,14 @@ class sc_unsigned;
 namespace sc_core {
 
 class sc_module;
+class sc_process_b;
 class sc_signal_channel;
 
 enum sc_power_action {
     SC_PWR_NORMAL = 0,
     SC_PWR_CLAMP_ZERO,
     SC_PWR_CLAMP_ONE,
+    SC_PWR_CLAMP_Z,
     SC_PWR_CLAMP_LATCH,
     SC_PWR_CORRUPT_FLIP,
     SC_PWR_CORRUPT_SCRAMBLE,
@@ -94,6 +96,22 @@ public:
     virtual sc_power_action evaluate_power_action(
         sc_signal_channel* channel_p,
         sc_dt::uint64&     scramble_seed_out ) = 0;
+
+    virtual sc_power_action evaluate_power_action(
+        sc_signal_channel* channel_p,
+        sc_dt::uint64&     scramble_seed_out,
+        bool               /*value_changing*/ )
+    {
+        return evaluate_power_action( channel_p, scramble_seed_out );
+    }
+
+    virtual sc_power_action evaluate_driver_power_action(
+        sc_signal_channel* /*channel_p*/,
+        sc_process_b*      /*driver_proc_p*/,
+        sc_dt::uint64&     /*scramble_seed_out*/ )
+    {
+        return SC_PWR_NORMAL;
+    }
 
 private:
     bool m_active;
@@ -163,6 +181,33 @@ void apply_action_value(
 
     case SC_PWR_CLAMP_LATCH:
         dst = latched;
+        return;
+
+    case SC_PWR_CLAMP_Z:
+        if constexpr ( std::is_same_v<T, sc_dt::sc_logic> ) {
+            dst = sc_dt::SC_LOGIC_Z;
+        } else if constexpr ( is_sc_lv<T>::value ) {
+            const int len = dst.length();
+            for ( int i = 0; i < len; ++i ) {
+                dst.set_bit( i, sc_dt::Log_Z );
+            }
+        } else if constexpr ( std::is_same_v<T, bool> ) {
+            dst = false;
+        } else if constexpr ( is_sc_bv<T>::value ) {
+            const int len = dst.length();
+            for ( int i = 0; i < len; ++i ) {
+                dst.set_bit( i, false );
+            }
+        } else if constexpr ( is_sc_int_or_uint<T>::value ) {
+            const int len = dst.length();
+            for ( int i = 0; i < len; ++i ) {
+                dst[i] = 0;
+            }
+        } else if constexpr ( std::is_integral_v<T> ) {
+            dst = static_cast<T>( 0 );
+        } else {
+            dst = T();
+        }
         return;
 
     case SC_PWR_CLAMP_ZERO:
@@ -293,17 +338,23 @@ class SC_API sc_signal_power_ext_base
 public:
     explicit sc_signal_power_ext_base( sc_channel_power_if* policy_p )
       : m_policy_p( policy_p )
+      , m_last_writer_p( nullptr )
     {}
     virtual ~sc_signal_power_ext_base() = default;
 
     sc_channel_power_if* policy() const { return m_policy_p; }
     void set_policy( sc_channel_power_if* policy_p ) { m_policy_p = policy_p; }
 
+    sc_process_b* last_writer() const { return m_last_writer_p; }
+    void set_last_writer( sc_process_b* writer_p )
+        { if ( writer_p != nullptr ) m_last_writer_p = writer_p; }
+
     bool is_active() const
         { return m_policy_p != nullptr && m_policy_p->is_active(); }
 
 private:
     sc_channel_power_if* m_policy_p;
+    sc_process_b*        m_last_writer_p;
 };
 
 template< typename T >

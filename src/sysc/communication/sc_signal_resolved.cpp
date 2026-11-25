@@ -123,7 +123,25 @@ sc_signal_resolved::write( const value_type& value_ )
 void
 sc_signal_resolved::update()
 {
-    sc_logic_resolve( m_new_val, m_val_vec );
+    if ( !m_val_vec.empty() ) {
+        if ( SC_UNLIKELY_( this->has_active_power_policy() ) ) {
+            std::vector<value_type> eff_vals( m_val_vec.size() );
+            sc_channel_power_if* pol_p = this->get_power_policy();
+            for ( std::size_t i = 0; i < m_val_vec.size(); ++i ) {
+                eff_vals[i] = m_val_vec[i];
+                sc_dt::uint64 seed = 0;
+                const sc_power_action act =
+                    pol_p->evaluate_driver_power_action( this, m_proc_vec[i], seed );
+                if ( act != SC_PWR_NORMAL ) {
+                    sc_power_detail::apply_action_value<value_type>(
+                        act, eff_vals[i], m_val_vec[i], m_val_vec[i], m_val_vec[i], seed );
+                }
+            }
+            sc_logic_resolve( m_new_val, eff_vals );
+        } else {
+            sc_logic_resolve( m_new_val, m_val_vec );
+        }
+    }
     base_type::update();
 }
 

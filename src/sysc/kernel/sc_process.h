@@ -289,6 +289,9 @@ class SC_API sc_process_b : public sc_object_host {
     virtual void dont_initialize( bool dont );
     bool is_power_gated() const { return m_power_gated; }
     void set_power_gated( bool gated, bool retrigger_combinational = true );
+    bool has_edge_sensitivity() const;
+    const std::vector<const sc_event*>& get_static_events() const
+        { return m_static_events; }
     std::string dump_state() const;
     inline sc_curr_proc_kind proc_kind() const;
     sc_event& reset_event();

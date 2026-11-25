@@ -1,5 +1,5 @@
 SystemC Simulation
-active: cfg=0x1234 cnt=3 comb=0x1237 irq=1 lv=10100101
-off: cfg=0xedcb cnt=0xfffc irq=0 lv=XXXXXXXX neg_cnt=1
+active: cfg=0x1234 cnt=3 comb=0x1237 irq=1 lv=10100101 rv=11001100
+off: cfg=0xedcb cnt=0xfffc irq=0 lv=XXXXXXXX rv=ZZZZZZZZ neg_cnt=1
 restored: cfg=0x1234 cnt=0 comb=0x1234
-resumed: cfg=0x1234 cnt=1 comb=0x1235 irq=1 pos_cnt=2
+resumed: cfg=0x1234 cnt=1 comb=0x1235 irq=1 rv=11001100 pos_cnt=2

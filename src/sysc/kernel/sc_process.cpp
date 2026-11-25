@@ -38,6 +38,7 @@
 #include "sysc/kernel/sc_sensitive.h"
 #include "sysc/kernel/sc_process_handle.h"
 #include "sysc/kernel/sc_event.h"
+#include <cstring>
 #include <sstream>
 
 namespace sc_core {
@@ -47,8 +48,9 @@ namespace sc_core {
 // Note the special name for 'non_event' - this makes sure it does not
 // appear as a named event.
 
-std::vector<sc_event*>  sc_process_handle::empty_event_vector;
-std::vector<sc_object*> sc_process_handle::empty_object_vector;
+std::vector<sc_event*>        sc_process_handle::empty_event_vector;
+std::vector<const sc_event*>  sc_process_handle::empty_const_event_vector;
+std::vector<sc_object*>       sc_process_handle::empty_object_vector;
 sc_event&               sc_process_handle::non_event() { return sc_get_curr_simcontext()->null_event(); }
 
 // Last process that was created:
@@ -600,6 +602,32 @@ void sc_process_b::set_power_gated( bool gated, bool retrigger_combinational )
         sc_method_handle method_h = static_cast<sc_method_handle>( this );
         method_h->trigger_static();
     }
+}
+
+bool sc_process_b::has_edge_sensitivity() const
+{
+    if ( m_process_kind == SC_CTHREAD_PROC_ )
+        return true;
+    if ( m_has_reset_signal || !m_resets.empty() )
+        return true;
+    for ( std::size_t i = 0; i < m_static_events.size(); ++i ) {
+        const sc_event* ev = m_static_events[i];
+        if ( !ev )
+            continue;
+        const char* nm = ev->name();
+        const std::size_t len = nm ? std::strlen( nm ) : 0;
+        if ( len >= 14 &&
+             ( std::strcmp( nm + len - 14, "_posedge_event" ) == 0 ||
+               std::strcmp( nm + len - 14, "_negedge_event" ) == 0 ) )
+        {
+            return true;
+        }
+        if ( const sc_object* par = ev->get_parent_object() ) {
+            if ( std::strcmp( par->kind(), "sc_clock" ) == 0 )
+                return true;
+        }
+    }
+    return false;
 }
 
 //------------------------------------------------------------------------------

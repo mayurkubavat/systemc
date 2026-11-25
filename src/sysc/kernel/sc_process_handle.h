@@ -134,6 +134,10 @@ class SC_API sc_process_handle {
         { return m_target_p ? m_target_p->is_power_gated() : false; }
     inline void set_power_gated( bool gated, bool retrigger_combinational = true )
         { if ( m_target_p ) m_target_p->set_power_gated( gated, retrigger_combinational ); }
+    inline bool has_edge_sensitivity() const
+        { return m_target_p ? m_target_p->has_edge_sensitivity() : false; }
+    inline const std::vector<const sc_event*>& get_static_events() const
+        { return m_target_p ? m_target_p->get_static_events() : empty_const_event_vector; }
 
   protected:
     inline bool dont_initialize() const
@@ -151,9 +155,10 @@ class SC_API sc_process_handle {
     sc_process_b* m_target_p;   // Target for this object instance.
 
   protected:
-    static std::vector<sc_event*>  empty_event_vector;  // If m_target_p == 0.
-    static std::vector<sc_object*> empty_object_vector; // If m_target_p == 0.
-    static sc_event&               non_event();         // If m_target_p == 0.
+    static std::vector<sc_event*>        empty_event_vector;       // If m_target_p == 0.
+    static std::vector<const sc_event*>  empty_const_event_vector; // If m_target_p == 0.
+    static std::vector<sc_object*>       empty_object_vector;      // If m_target_p == 0.
+    static sc_event&                     non_event();              // If m_target_p == 0.
 };
 
 inline bool operator == (

@@ -103,7 +103,10 @@ public:
         { return m_power_ext_p ? m_power_ext_p->policy() : 0; }
     bool has_active_power_policy() const
         { return m_power_ext_p != 0 && m_power_ext_p->is_active(); }
+    sc_process_b* power_last_writer() const
+        { return m_power_ext_p ? m_power_ext_p->last_writer() : 0; }
     virtual void power_capture_retention() {}
+    virtual void power_corrupt_retention( sc_dt::uint64 /*seed*/ ) {}
     virtual void power_capture_isolation_latch() {}
     void trigger_power_update()
         { request_update(); }
@@ -268,6 +271,7 @@ public:
 
     virtual void set_power_policy( sc_channel_power_if* policy_p );
     virtual void power_capture_retention();
+    virtual void power_corrupt_retention( sc_dt::uint64 seed );
     virtual void power_capture_isolation_latch();
 
 
@@ -313,6 +317,10 @@ sc_signal_t<T,POL>::write( const T& value_ )
         return;
 
     m_new_val = value_;
+    if ( SC_UNLIKELY_( this->m_power_ext_p != 0 ) ) {
+        this->m_power_ext_p->set_last_writer(
+            sc_get_curr_simcontext()->get_current_writer() );
+    }
     if( value_changed || policy_type::needs_update() ) {
         request_update();
     }
@@ -352,6 +360,9 @@ sc_signal_t<T,POL>::set_power_policy( sc_channel_power_if* policy_p )
     } else {
         this->m_power_ext_p->set_policy( policy_p );
     }
+    if ( sc_process_b* wr_p = policy_type::last_writer_proc() ) {
+        this->m_power_ext_p->set_last_writer( wr_p );
+    }
 }
 
 template< class T, sc_writer_policy POL >
@@ -361,6 +372,23 @@ sc_signal_t<T,POL>::power_capture_retention()
     if ( this->m_power_ext_p ) {
         static_cast<sc_power_detail::sc_signal_power_ext<T>*>(
             this->m_power_ext_p )->m_retained_val = m_cur_val;
+    }
+}
+
+template< class T, sc_writer_policy POL >
+void
+sc_signal_t<T,POL>::power_corrupt_retention( sc_dt::uint64 seed )
+{
+    if ( this->m_power_ext_p ) {
+        auto* ext_p = static_cast<sc_power_detail::sc_signal_power_ext<T>*>(
+            this->m_power_ext_p );
+        sc_power_detail::apply_action_value<T>(
+            SC_PWR_CORRUPT_SCRAMBLE,
+            ext_p->m_retained_val,
+            ext_p->m_retained_val,
+            ext_p->m_retained_val,
+            ext_p->m_latched_val,
+            seed );
     }
 }
 
@@ -381,8 +409,9 @@ sc_signal_t<T,POL>::apply_power_policy()
     auto* ext_p = static_cast<sc_power_detail::sc_signal_power_ext<T>*>(
         this->m_power_ext_p );
     sc_dt::uint64 seed = 0;
+    const bool value_changing = !( m_new_val == m_cur_val );
     const sc_power_action act =
-        ext_p->policy()->evaluate_power_action( this, seed );
+        ext_p->policy()->evaluate_power_action( this, seed, value_changing );
     sc_power_detail::apply_action_value<T>(
         act, m_new_val, m_cur_val,
         ext_p->m_retained_val, ext_p->m_latched_val, seed );
